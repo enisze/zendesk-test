@@ -19,12 +19,14 @@ export type RateLimitResult =
   | { ok: true }
   | { ok: false; scope: "user" | "global"; retryAfter: number };
 
-function blocked(scope: "user" | "global", res: RateLimiterRes): RateLimitResult {
-  return {
-    ok: false,
-    scope,
-    retryAfter: Math.max(1, Math.ceil(res.msBeforeNext / 1000)),
-  };
+function blocked(
+  scope: "user" | "global",
+  res: RateLimiterRes,
+): RateLimitResult {
+  const secondsUntilReset = Math.ceil(res.msBeforeNext / 1000);
+  // Never tell the caller to retry in 0s — round any sub-second wait up to 1.
+  const retryAfter = Math.max(secondsUntilReset, 1);
+  return { ok: false, scope, retryAfter };
 }
 
 export async function checkRemoveCcRateLimit(
@@ -43,7 +45,9 @@ export async function checkRemoveCcRateLimit(
     await global.consume(GLOBAL_KEY);
   } catch (res) {
     if (res instanceof RateLimiterRes) {
-      // Give the per-user point back so they aren't penalised for global pressure.
+      // The user's point was already consumed above, but the request never
+      // ran — refund it so they aren't blocked again by their own limit when
+      // they retry after the global window resets.
       await perUser.reward(userKey, 1);
       return blocked("global", res);
     }
