@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +17,10 @@ type Props = {
   userId: number;
   initialTickets: ZendeskTicket[];
   initiallyCached: boolean;
+  hasMore: boolean;
+  afterCursor: string | null;
+  beforeCursor: string | null;
+  isFirstPage: boolean;
 };
 
 type Banner = { kind: "error" | "info"; text: string } | null;
@@ -27,7 +32,15 @@ function isUserCcd(ticket: ZendeskTicket, userId: number): boolean {
   );
 }
 
-export function TicketsView({ userId, initialTickets, initiallyCached }: Props) {
+export function TicketsView({
+  userId,
+  initialTickets,
+  initiallyCached,
+  hasMore,
+  afterCursor,
+  beforeCursor,
+  isFirstPage,
+}: Props) {
   const [tickets, setTickets] = useState(initialTickets);
   const [banner, setBanner] = useState<Banner>(null);
   const [pendingId, setPendingId] = useState<number | null>(null);
@@ -63,6 +76,9 @@ export function TicketsView({ userId, initialTickets, initiallyCached }: Props) 
     });
   }
 
+  const showPagination =
+    !isFirstPage || hasMore || beforeCursor !== null || afterCursor !== null;
+
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-12">
       <header className="mb-6">
@@ -71,7 +87,7 @@ export function TicketsView({ userId, initialTickets, initiallyCached }: Props) 
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Showing tickets where user #{userId} is CC'd.
-          {initiallyCached ? " (initial load served from cache)" : ""}
+          {initiallyCached ? " (page served from cache)" : ""}
         </p>
       </header>
 
@@ -89,7 +105,7 @@ export function TicketsView({ userId, initialTickets, initiallyCached }: Props) 
 
       {tickets.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No tickets currently CC this user.
+          No tickets on this page.
         </p>
       ) : (
         <ul className="flex flex-col gap-3">
@@ -140,6 +156,42 @@ export function TicketsView({ userId, initialTickets, initiallyCached }: Props) 
           })}
         </ul>
       )}
+
+      {showPagination ? (
+        <nav className="mt-6 flex items-center justify-between gap-2">
+          {beforeCursor && !isFirstPage ? (
+            <Link
+              href={`/?before=${encodeURIComponent(beforeCursor)}`}
+              className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+            >
+              ← Previous
+            </Link>
+          ) : (
+            <Link
+              href="/"
+              className={
+                isFirstPage
+                  ? "pointer-events-none inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium opacity-50"
+                  : "inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+              }
+              aria-disabled={isFirstPage}
+            >
+              ← First
+            </Link>
+          )}
+
+          {hasMore && afterCursor ? (
+            <Link
+              href={`/?after=${encodeURIComponent(afterCursor)}`}
+              className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+            >
+              Next →
+            </Link>
+          ) : (
+            <span className="text-xs text-muted-foreground">End of list</span>
+          )}
+        </nav>
+      ) : null}
     </div>
   );
 }

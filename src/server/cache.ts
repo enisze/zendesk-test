@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { db, schema } from "./db";
 
 const { cacheEntries } = schema;
@@ -43,4 +43,8 @@ export async function cacheSet<T>(
 
 export async function cacheInvalidate(key: string): Promise<void> {
   await db.delete(cacheEntries).where(eq(cacheEntries.key, key));
+}
+
+export async function cacheInvalidatePrefix(prefix: string): Promise<void> {
+  await db.delete(cacheEntries).where(like(cacheEntries.key, `${prefix}%`));
 }

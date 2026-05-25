@@ -7,17 +7,40 @@ import { TicketsView } from "./tickets-view";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+const PAGE_SIZE = 25;
+
+type SearchParams = Promise<{ after?: string; before?: string }>;
+
+function readCursor(value: string | undefined): string | null {
+  return value && value.length > 0 ? value : null;
+}
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const userId = config.demoUserId;
+  const { after, before } = await searchParams;
 
   try {
-    const { tickets, cached } = await zendeskRepository.listCcTickets(userId);
+    const result = await zendeskRepository.listCcTickets({
+      userId,
+      pageSize: PAGE_SIZE,
+      after: readCursor(after),
+      before: readCursor(before),
+    });
+
     return (
       <main className="flex flex-1 w-full bg-zinc-50 dark:bg-black">
         <TicketsView
           userId={userId}
-          initialTickets={tickets}
-          initiallyCached={cached}
+          initialTickets={result.tickets}
+          initiallyCached={result.cached}
+          hasMore={result.hasMore}
+          afterCursor={result.afterCursor}
+          beforeCursor={result.beforeCursor}
+          isFirstPage={!after && !before}
         />
       </main>
     );
