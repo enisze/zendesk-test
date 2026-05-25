@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useAction } from "next-safe-action/hooks";
+import { PaginationLink } from "@/components/pagination-link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -126,33 +126,29 @@ export function TicketsView({
       {showPagination ? (
         <nav className="mt-6 flex items-center justify-between gap-2">
           {beforeCursor && !isFirstPage ? (
-            <Link
+            <PaginationLink
               href={`/?before=${encodeURIComponent(beforeCursor)}`}
-              className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+              ariaLabel="Previous page"
             >
               ← Previous
-            </Link>
+            </PaginationLink>
           ) : (
-            <Link
-              href="/"
-              className={
-                isFirstPage
-                  ? "pointer-events-none inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium opacity-50"
-                  : "inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
-              }
-              aria-disabled={isFirstPage}
+            <PaginationLink
+              href={isFirstPage ? undefined : "/"}
+              disabled={isFirstPage}
+              ariaLabel="First page"
             >
               ← First
-            </Link>
+            </PaginationLink>
           )}
 
           {hasMore && afterCursor ? (
-            <Link
+            <PaginationLink
               href={`/?after=${encodeURIComponent(afterCursor)}`}
-              className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+              ariaLabel="Next page"
             >
               Next →
-            </Link>
+            </PaginationLink>
           ) : (
             <span className="text-xs text-muted-foreground">End of list</span>
           )}

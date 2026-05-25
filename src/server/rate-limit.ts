@@ -35,15 +35,19 @@ export async function checkRemoveCcRateLimit(
   try {
     await perUser.consume(userKey);
   } catch (res) {
-    return blocked("user", res as RateLimiterRes);
+    if (res instanceof RateLimiterRes) return blocked("user", res);
+    throw res;
   }
 
   try {
     await global.consume(GLOBAL_KEY);
   } catch (res) {
-    // Give the per-user point back so they aren't penalised for global pressure.
-    await perUser.reward(userKey, 1);
-    return blocked("global", res as RateLimiterRes);
+    if (res instanceof RateLimiterRes) {
+      // Give the per-user point back so they aren't penalised for global pressure.
+      await perUser.reward(userKey, 1);
+      return blocked("global", res);
+    }
+    throw res;
   }
 
   return { ok: true };
