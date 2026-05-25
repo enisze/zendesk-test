@@ -39,14 +39,17 @@ export function TicketsView({ userId, initialTickets, initiallyCached }: Props) 
     startTransition(async () => {
       const result =
         action === "remove"
-          ? await removeFromCcAction(ticket.id)
-          : await addToCcAction(ticket.id);
+          ? await removeFromCcAction({ ticketId: ticket.id })
+          : await addToCcAction({ ticketId: ticket.id });
 
-      if (!result.ok) {
-        setBanner({ kind: "error", text: result.error });
-      } else {
+      if (result?.serverError) {
+        setBanner({ kind: "error", text: result.serverError });
+      } else if (result?.validationErrors) {
+        setBanner({ kind: "error", text: "Invalid request." });
+      } else if (result?.data?.ticket) {
+        const updated = result.data.ticket;
         setTickets((prev) =>
-          prev.map((t) => (t.id === ticket.id ? result.ticket : t)),
+          prev.map((t) => (t.id === ticket.id ? updated : t)),
         );
         setBanner({
           kind: "info",

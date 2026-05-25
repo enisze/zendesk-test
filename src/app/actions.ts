@@ -1,60 +1,47 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { zendeskRepository } from "@/repositories/zendesk-repository";
+import { RateLimitError, actionClient } from "@/lib/safe-action";
 import { config } from "@/server/config";
 import { checkRemoveCcRateLimit } from "@/server/rate-limit";
-import {
-  ZendeskError,
-  type ZendeskTicket,
-  zendeskRepository,
-} from "@/repositories/zendesk-repository";
 
-export type ActionResult =
-  | { ok: true; ticket: ZendeskTicket }
-  | { ok: false; error: string; retryAfterSeconds?: number };
+const ticketIdSchema = z.object({
+  ticketId: z.number().int().positive(),
+});
 
-export async function removeFromCcAction(
-  ticketId: number,
-): Promise<ActionResult> {
-  const userId = config.demoUserId;
+export const removeFromCcAction = actionClient
+  .inputSchema(ticketIdSchema)
+  .action(async ({ parsedInput }) => {
+    const userId = config.demoUserId;
 
-  const limit = checkRemoveCcRateLimit(userId);
-  if (!limit.ok) {
-    return {
-      ok: false,
-      error:
+    const limit = checkRemoveCcRateLimit(userId);
+    if (!limit.ok) {
+      throw new RateLimitError(
         limit.scope === "user"
-          ? `Rate limit: 1 remove-from-CC per user per minute. Try again in ${limit.retryAfter}s.`
-          : `Rate limit: 3 remove-from-CC globally per minute. Try again in ${limit.retryAfter}s.`,
-      retryAfterSeconds: limit.retryAfter,
-    };
-  }
+          ? "Rate limit: 1 remove-from-CC per user per minute."
+          : "Rate limit: 3 remove-from-CC globally per minute.",
+        limit.retryAfter,
+        limit.scope,
+      );
+    }
 
-  try {
-    const ticket = await zendeskRepository.removeUserFromCc(ticketId, userId);
+    const ticket = await zendeskRepository.removeUserFromCc(
+      parsedInput.ticketId,
+      userId,
+    );
     revalidatePath("/");
-    return { ok: true, ticket };
-  } catch (err) {
-    return { ok: false, error: formatError(err) };
-  }
-}
+    return { ticket };
+  });
 
-export async function addToCcAction(
-  ticketId: number,
-): Promise<ActionResult> {
-  try {
+export const addToCcAction = actionClient
+  .inputSchema(ticketIdSchema)
+  .action(async ({ parsedInput }) => {
     const ticket = await zendeskRepository.addUserToCc(
-      ticketId,
+      parsedInput.ticketId,
       config.demoUserId,
     );
     revalidatePath("/");
-    return { ok: true, ticket };
-  } catch (err) {
-    return { ok: false, error: formatError(err) };
-  }
-}
-
-function formatError(err: unknown): string {
-  if (err instanceof ZendeskError) return `Zendesk error: ${err.message}`;
-  return err instanceof Error ? err.message : "Unknown error";
-}
+    return { ticket };
+  });
