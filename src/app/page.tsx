@@ -1,42 +1,38 @@
+import type { SearchParams } from "nuqs/server";
 import { config } from "@/server/config";
 import {
   ZendeskError,
   zendeskRepository,
 } from "@/repositories/zendesk-repository";
+import { paginationSearchParams } from "./search-params";
 import { TicketsView } from "./tickets-view";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
 
-type SearchParams = Promise<{ after?: string; before?: string }>;
-
-function readCursor(value: string | undefined): string | null {
-  return value && value.length > 0 ? value : null;
-}
-
 export default async function Home({
   searchParams,
 }: {
-  searchParams: SearchParams;
+  searchParams: Promise<SearchParams>;
 }) {
   const userId = config.demoUserId;
-  const { after, before } = await searchParams;
+  const { after, before } = await paginationSearchParams.parse(searchParams);
 
   try {
     const result = await zendeskRepository.listCcTickets({
       userId,
       pageSize: PAGE_SIZE,
-      after: readCursor(after),
-      before: readCursor(before),
+      after,
+      before,
     });
 
     return (
       <main className="flex flex-1 w-full bg-zinc-50 dark:bg-black">
         <TicketsView
           userId={userId}
-          initialTickets={result.tickets}
-          initiallyCached={result.cached}
+          tickets={result.tickets}
+          cached={result.cached}
           hasMore={result.hasMore}
           afterCursor={result.afterCursor}
           beforeCursor={result.beforeCursor}
