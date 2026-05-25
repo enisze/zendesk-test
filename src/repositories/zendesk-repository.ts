@@ -1,4 +1,5 @@
 import "server-only";
+import { z } from "zod";
 import {
   cacheGet,
   cacheInvalidatePrefix,
@@ -6,17 +7,38 @@ import {
 } from "@/server/cache";
 import { config } from "@/server/config";
 
-export type ZendeskTicket = {
-  id: number;
-  subject: string;
-  status: string;
-  priority: string | null;
-  url: string;
-  created_at: string;
-  updated_at: string;
-  collaborator_ids: number[];
-  email_cc_ids: number[];
-};
+const ticketSchema = z.object({
+  id: z.number(),
+  subject: z.string().nullable().transform((v) => v ?? ""),
+  status: z.string(),
+  priority: z.string().nullable().optional().transform((v) => v ?? null),
+  url: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  collaborator_ids: z.array(z.number()).optional().default([]),
+  email_cc_ids: z.array(z.number()).optional().default([]),
+});
+
+const metaSchema = z.object({
+  has_more: z.boolean().default(false),
+  after_cursor: z.string().nullable().default(null),
+  before_cursor: z.string().nullable().default(null),
+});
+
+const ccdListResponseSchema = z.object({
+  tickets: z.array(ticketSchema),
+  meta: metaSchema.default({
+    has_more: false,
+    after_cursor: null,
+    before_cursor: null,
+  }),
+});
+
+const singleTicketResponseSchema = z.object({
+  ticket: ticketSchema,
+});
+
+export type ZendeskTicket = z.infer<typeof ticketSchema>;
 
 export type Cursor = string | null;
 
@@ -44,31 +66,6 @@ export class ZendeskError extends Error {
   }
 }
 
-type ApiTicket = Omit<
-  ZendeskTicket,
-  "collaborator_ids" | "email_cc_ids"
-> & {
-  collaborator_ids?: number[];
-  email_cc_ids?: number[];
-};
-
-type ListResponse = {
-  tickets: ApiTicket[];
-  meta?: {
-    has_more?: boolean;
-    after_cursor?: string | null;
-    before_cursor?: string | null;
-  };
-};
-
-function normalize(t: ApiTicket): ZendeskTicket {
-  return {
-    ...t,
-    collaborator_ids: t.collaborator_ids ?? [],
-    email_cc_ids: t.email_cc_ids ?? [],
-  };
-}
-
 function ccCachePrefix(userId: number): string {
   return `cc-tickets:${userId}:`;
 }
@@ -77,10 +74,11 @@ function ccCacheKey({ userId, pageSize, after, before }: ListCcTicketsArgs) {
   return `${ccCachePrefix(userId)}${pageSize ?? ""}|${after ?? ""}|${before ?? ""}`;
 }
 
-async function zendeskFetch(
+async function zendeskFetch<T extends z.ZodTypeAny>(
   pathname: string,
+  schema: T,
   init?: RequestInit,
-): Promise<Response> {
+): Promise<z.infer<T>> {
   const res = await fetch(`${config.zendesk.baseUrl}${pathname}`, {
     ...init,
     headers: {
@@ -98,7 +96,16 @@ async function zendeskFetch(
       res.status,
     );
   }
-  return res;
+
+  const json: unknown = await res.json();
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) {
+    throw new ZendeskError(
+      `Zendesk ${init?.method ?? "GET"} ${pathname} returned an unexpected payload: ${parsed.error.message}`,
+      500,
+    );
+  }
+  return parsed.data;
 }
 
 function buildCcdUrl(args: ListCcTicketsArgs): string {
@@ -115,14 +122,13 @@ export const zendeskRepository = {
     const cached = await cacheGet<Omit<ListResult, "cached">>(key);
     if (cached) return { ...cached, cached: true };
 
-    const res = await zendeskFetch(buildCcdUrl(args));
-    const data = (await res.json()) as ListResponse;
+    const data = await zendeskFetch(buildCcdUrl(args), ccdListResponseSchema);
 
     const result: Omit<ListResult, "cached"> = {
-      tickets: data.tickets.map(normalize),
-      hasMore: data.meta?.has_more ?? false,
-      afterCursor: data.meta?.after_cursor ?? null,
-      beforeCursor: data.meta?.before_cursor ?? null,
+      tickets: data.tickets,
+      hasMore: data.meta.has_more,
+      afterCursor: data.meta.after_cursor,
+      beforeCursor: data.meta.before_cursor,
     };
 
     await cacheSet(key, result, config.cacheTtlMs);
@@ -130,21 +136,26 @@ export const zendeskRepository = {
   },
 
   async getTicket(ticketId: number): Promise<ZendeskTicket> {
-    const res = await zendeskFetch(`/tickets/${ticketId}.json`);
-    const data = (await res.json()) as { ticket: ApiTicket };
-    return normalize(data.ticket);
+    const data = await zendeskFetch(
+      `/tickets/${ticketId}.json`,
+      singleTicketResponseSchema,
+    );
+    return data.ticket;
   },
 
   async setCollaborators(
     ticketId: number,
     collaboratorIds: number[],
   ): Promise<ZendeskTicket> {
-    const res = await zendeskFetch(`/tickets/${ticketId}.json`, {
-      method: "PUT",
-      body: JSON.stringify({ ticket: { collaborator_ids: collaboratorIds } }),
-    });
-    const data = (await res.json()) as { ticket: ApiTicket };
-    return normalize(data.ticket);
+    const data = await zendeskFetch(
+      `/tickets/${ticketId}.json`,
+      singleTicketResponseSchema,
+      {
+        method: "PUT",
+        body: JSON.stringify({ ticket: { collaborator_ids: collaboratorIds } }),
+      },
+    );
+    return data.ticket;
   },
 
   async removeUserFromCc(
