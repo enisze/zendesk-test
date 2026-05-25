@@ -1,11 +1,13 @@
-import type { SearchParams } from "nuqs/server";
+import { createSearchParamsCache, type SearchParams } from "nuqs/server";
 import { config } from "@/server/config";
 import {
   ZendeskError,
   zendeskRepository,
 } from "@/repositories/zendesk-repository";
-import { paginationSearchParams } from "./search-params-cache";
+import { paginationParsers } from "./search-params";
 import { TicketsView } from "./tickets-view";
+
+const paginationSearchParams = createSearchParamsCache(paginationParsers);
 
 export const dynamic = "force-dynamic";
 
