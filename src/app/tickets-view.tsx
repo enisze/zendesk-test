@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,106 +9,44 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { ZendeskTicket } from "@/repositories/zendesk-repository";
+import { addToCcAction, removeFromCcAction } from "./actions";
 
-type Ticket = {
-  id: number;
-  subject: string;
-  status: string;
-  priority: string | null;
-  url: string;
-  created_at: string;
-  updated_at: string;
-  collaborator_ids: number[];
-  email_cc_ids: number[];
-};
-
-type ListResponse = {
+type Props = {
   userId: number;
-  cached: boolean;
-  tickets: Ticket[];
+  initialTickets: ZendeskTicket[];
+  initiallyCached: boolean;
 };
 
 type Banner = { kind: "error" | "info"; text: string } | null;
 
-function isUserCcd(ticket: Ticket, userId: number): boolean {
+function isUserCcd(ticket: ZendeskTicket, userId: number): boolean {
   return (
     ticket.collaborator_ids.includes(userId) ||
     ticket.email_cc_ids.includes(userId)
   );
 }
 
-export function TicketsView() {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [userId, setUserId] = useState<number | null>(null);
-  const [cached, setCached] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [pendingId, setPendingId] = useState<number | null>(null);
+export function TicketsView({ userId, initialTickets, initiallyCached }: Props) {
+  const [tickets, setTickets] = useState(initialTickets);
   const [banner, setBanner] = useState<Banner>(null);
+  const [pendingId, setPendingId] = useState<number | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  function runToggle(ticket: ZendeskTicket, action: "remove" | "add") {
+    setPendingId(ticket.id);
     setBanner(null);
-    try {
-      const res = await fetch("/api/tickets", { cache: "no-store" });
-      const data = (await res.json()) as ListResponse | { message?: string };
-      if (!res.ok) {
-        const msg =
-          "message" in data && data.message ? data.message : "Failed to load.";
-        setBanner({ kind: "error", text: msg });
-        return;
-      }
-      const ok = data as ListResponse;
-      setTickets(ok.tickets);
-      setUserId(ok.userId);
-      setCached(ok.cached);
-    } catch (err) {
-      setBanner({
-        kind: "error",
-        text: err instanceof Error ? err.message : "Failed to load.",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    startTransition(async () => {
+      const result =
+        action === "remove"
+          ? await removeFromCcAction(ticket.id)
+          : await addToCcAction(ticket.id);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const toggleCc = useCallback(
-    async (ticket: Ticket, action: "remove" | "add") => {
-      setPendingId(ticket.id);
-      setBanner(null);
-      try {
-        const res = await fetch(`/api/tickets/${ticket.id}/cc`, {
-          method: action === "remove" ? "DELETE" : "POST",
-        });
-        const data = (await res.json()) as {
-          ticket?: Ticket;
-          message?: string;
-          retryAfterSeconds?: number;
-          scope?: string;
-        };
-        if (res.status === 429) {
-          setBanner({
-            kind: "error",
-            text:
-              `${data.message ?? "Rate limited."}` +
-              (data.retryAfterSeconds
-                ? ` Try again in ${data.retryAfterSeconds}s.`
-                : ""),
-          });
-          return;
-        }
-        if (!res.ok || !data.ticket) {
-          setBanner({
-            kind: "error",
-            text: data.message ?? "Request failed.",
-          });
-          return;
-        }
+      if (!result.ok) {
+        setBanner({ kind: "error", text: result.error });
+      } else {
         setTickets((prev) =>
-          prev.map((t) => (t.id === ticket.id ? (data.ticket as Ticket) : t)),
+          prev.map((t) => (t.id === ticket.id ? result.ticket : t)),
         );
         setBanner({
           kind: "info",
@@ -117,40 +55,21 @@ export function TicketsView() {
               ? `Removed from CC on ticket #${ticket.id}.`
               : `Added back to CC on ticket #${ticket.id}.`,
         });
-      } catch (err) {
-        setBanner({
-          kind: "error",
-          text: err instanceof Error ? err.message : "Request failed.",
-        });
-      } finally {
-        setPendingId(null);
       }
-    },
-    [],
-  );
+      setPendingId(null);
+    });
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-12">
-      <header className="mb-6 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Zendesk tickets CC'ing you
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {userId !== null
-              ? `Showing tickets where user #${userId} is CC'd.`
-              : "Loading…"}
-            {cached ? " (served from cache)" : ""}
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          {loading ? "Loading…" : "Refresh"}
-        </Button>
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Zendesk tickets CC'ing you
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Showing tickets where user #{userId} is CC'd.
+          {initiallyCached ? " (initial load served from cache)" : ""}
+        </p>
       </header>
 
       {banner ? (
@@ -165,17 +84,15 @@ export function TicketsView() {
         </div>
       ) : null}
 
-      {loading && tickets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Loading tickets…</p>
-      ) : tickets.length === 0 ? (
+      {tickets.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No tickets currently CC this user.
         </p>
       ) : (
         <ul className="flex flex-col gap-3">
           {tickets.map((ticket) => {
-            const ccd = userId !== null && isUserCcd(ticket, userId);
-            const isPending = pendingId === ticket.id;
+            const ccd = isUserCcd(ticket, userId);
+            const rowPending = isPending && pendingId === ticket.id;
             return (
               <li key={ticket.id}>
                 <Card>
@@ -187,8 +104,7 @@ export function TicketsView() {
                       Status: {ticket.status}
                       {ticket.priority ? ` · Priority: ${ticket.priority}` : ""}
                       {" · "}
-                      Updated{" "}
-                      {new Date(ticket.updated_at).toLocaleString()}
+                      Updated {new Date(ticket.updated_at).toLocaleString()}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex items-center justify-between gap-2">
@@ -199,19 +115,19 @@ export function TicketsView() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        disabled={isPending}
-                        onClick={() => void toggleCc(ticket, "remove")}
+                        disabled={rowPending}
+                        onClick={() => runToggle(ticket, "remove")}
                       >
-                        {isPending ? "Removing…" : "Remove from CC"}
+                        {rowPending ? "Removing…" : "Remove from CC"}
                       </Button>
                     ) : (
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={isPending}
-                        onClick={() => void toggleCc(ticket, "add")}
+                        disabled={rowPending}
+                        onClick={() => runToggle(ticket, "add")}
                       >
-                        {isPending ? "Adding…" : "Add back to CC"}
+                        {rowPending ? "Adding…" : "Add back to CC"}
                       </Button>
                     )}
                   </CardContent>
