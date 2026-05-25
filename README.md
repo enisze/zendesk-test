@@ -29,7 +29,7 @@ src/
 └─ server/
    ├─ config.ts         # env validation
    ├─ cache.ts          # Drizzle-backed key/value cache w/ TTL
-   ├─ rate-limit.ts     # sliding-window limiter
+   ├─ rate-limit.ts     # rate-limiter-flexible (in-memory)
    └─ db/
       ├─ index.ts       # better-sqlite3 + drizzle init + migrate()
       └─ schema.ts      # cache_entries table
@@ -99,10 +99,12 @@ Then open <http://localhost:3000>.
   bun run db:generate
   # the new migration is committed; the next dev/start applies it
   ```
-- The rate limiter keeps a sliding 60-second window of timestamps per key
-  in memory. The two limits are checked together; if the global gate fails
-  the per-user hit is rolled back so a user isn't penalised for someone
-  else's traffic.
+- Rate limiting is provided by
+  [`rate-limiter-flexible`](https://github.com/animir/node-rate-limiter-flexible)
+  via two `RateLimiterMemory` instances (per-user and global, both
+  60-second windows). The two limits are consumed in order; if the global
+  gate fails, the per-user point is rewarded back so a user isn't
+  penalised for someone else's traffic.
 
 ## Limitations
 

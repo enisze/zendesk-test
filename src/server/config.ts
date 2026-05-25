@@ -12,7 +12,6 @@ function required(name: string): string {
 
 export const config = {
   zendesk: {
-    // e.g. https://con-leafworks2.zendesk.com/api/v2
     baseUrl: required("ZENDESK_BASE_URL").replace(/\/+$/, ""),
     apiToken: required("ZENDESK_API_TOKEN"),
   },

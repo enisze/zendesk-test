@@ -16,7 +16,7 @@ export const removeFromCcAction = actionClient
   .action(async ({ parsedInput }) => {
     const userId = config.demoUserId;
 
-    const limit = checkRemoveCcRateLimit(userId);
+    const limit = await checkRemoveCcRateLimit(userId);
     if (!limit.ok) {
       throw new RateLimitError(
         limit.scope === "user"
