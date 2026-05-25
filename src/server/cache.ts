@@ -1,24 +1,21 @@
 import "server-only";
-import { eq, like } from "drizzle-orm";
-import { db, schema } from "./db";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
+import KeyvSqlite from "@keyv/sqlite";
+import Keyv from "keyv";
 
-const { cacheEntries } = schema;
+const dataDir = path.join(process.cwd(), "data");
+mkdirSync(dataDir, { recursive: true });
 
-export async function cacheGet<T>(key: string): Promise<T | null> {
-  const [row] = await db
-    .select()
-    .from(cacheEntries)
-    .where(eq(cacheEntries.key, key))
-    .limit(1);
+const NAMESPACE = "zendesk-cache";
 
-  if (!row) return null;
+export const cache = new Keyv({
+  store: new KeyvSqlite(`sqlite://${path.join(dataDir, "cache.sqlite")}`),
+  namespace: NAMESPACE,
+});
 
-  if (row.expiresAt < Date.now()) {
-    await db.delete(cacheEntries).where(eq(cacheEntries.key, key));
-    return null;
-  }
-
-  return JSON.parse(row.value) as T;
+export async function cacheGet<T>(key: string): Promise<T | undefined> {
+  return cache.get<T>(key);
 }
 
 export async function cacheSet<T>(
@@ -26,25 +23,20 @@ export async function cacheSet<T>(
   value: T,
   ttlMs: number,
 ): Promise<void> {
-  const entry = {
-    key,
-    value: JSON.stringify(value),
-    expiresAt: Date.now() + ttlMs,
-  };
-
-  await db
-    .insert(cacheEntries)
-    .values(entry)
-    .onConflictDoUpdate({
-      target: cacheEntries.key,
-      set: { value: entry.value, expiresAt: entry.expiresAt },
-    });
+  await cache.set(key, value, ttlMs);
 }
 
 export async function cacheInvalidate(key: string): Promise<void> {
-  await db.delete(cacheEntries).where(eq(cacheEntries.key, key));
+  await cache.delete(key);
 }
 
 export async function cacheInvalidatePrefix(prefix: string): Promise<void> {
-  await db.delete(cacheEntries).where(like(cacheEntries.key, `${prefix}%`));
+  // @keyv/sqlite implements the iterator; Keyv types it as optional.
+  const iterator = cache.iterator?.(NAMESPACE);
+  if (!iterator) return;
+  for await (const [key] of iterator) {
+    if (typeof key === "string" && key.startsWith(prefix)) {
+      await cache.delete(key);
+    }
+  }
 }
