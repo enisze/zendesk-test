@@ -17,7 +17,7 @@ export default async function Home({
   searchParams: Promise<SearchParams>;
 }) {
   const userId = config.demoUserId;
-  const { after, before, size } =
+  const { after, before, size, page } =
     await paginationSearchParams.parse(searchParams);
 
   try {
@@ -37,7 +37,7 @@ export default async function Home({
           hasMore={result.hasMore}
           afterCursor={result.afterCursor}
           beforeCursor={result.beforeCursor}
-          isFirstPage={!after && !before}
+          page={page}
           size={size}
         />
       </main>

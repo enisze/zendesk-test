@@ -92,7 +92,7 @@ async function zendeskFetch<T extends z.ZodTypeAny>(
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new ZendeskError(
-      `Zendesk ${init?.method ?? "GET"} ${pathname} failed: ${res.status} ${body}`,
+      `Zendesk ${init?.method} ${pathname} failed: ${res.status} ${body}`,
       res.status,
     );
   }
@@ -101,7 +101,7 @@ async function zendeskFetch<T extends z.ZodTypeAny>(
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
     throw new ZendeskError(
-      `Zendesk ${init?.method ?? "GET"} ${pathname} returned an unexpected payload: ${parsed.error.message}`,
+      `Zendesk ${init?.method} ${pathname} returned an unexpected payload: ${parsed.error.message}`,
       500,
     );
   }
@@ -122,7 +122,9 @@ export const zendeskRepository = {
     const cached = await cacheGet<Omit<ListResult, "cached">>(key);
     if (cached) return { ...cached, cached: true };
 
-    const data = await zendeskFetch(buildCcdUrl(args), ccdListResponseSchema);
+    const data = await zendeskFetch(buildCcdUrl(args), ccdListResponseSchema, {
+      method: "GET",
+    });
 
     const result: Omit<ListResult, "cached"> = {
       tickets: data.tickets,
@@ -135,57 +137,26 @@ export const zendeskRepository = {
     return { ...result, cached: false };
   },
 
-  async getTicket(ticketId: number): Promise<ZendeskTicket> {
-    const data = await zendeskFetch(
-      `/tickets/${ticketId}.json`,
-      singleTicketResponseSchema,
-    );
-    return data.ticket;
-  },
-
-  async setCollaborators(
-    ticketId: number,
-    collaboratorIds: number[],
-  ): Promise<ZendeskTicket> {
+  async updateEmailCc({
+    ticketId,
+    userId,
+    action,
+  }: {
+    ticketId: number;
+    userId: number;
+    action: "put" | "delete";
+  }): Promise<ZendeskTicket> {
     const data = await zendeskFetch(
       `/tickets/${ticketId}.json`,
       singleTicketResponseSchema,
       {
         method: "PUT",
-        body: JSON.stringify({ ticket: { collaborator_ids: collaboratorIds } }),
+        body: JSON.stringify({
+          ticket: { email_ccs: [{ user_id: userId, action }] },
+        }),
       },
     );
+    await cacheInvalidatePrefix(ccCachePrefix(userId));
     return data.ticket;
-  },
-
-  async removeUserFromCc(
-    ticketId: number,
-    userId: number,
-  ): Promise<ZendeskTicket> {
-    const ticket = await this.getTicket(ticketId);
-    const current = new Set([
-      ...ticket.collaborator_ids,
-      ...ticket.email_cc_ids,
-    ]);
-    if (!current.has(userId)) return ticket;
-    current.delete(userId);
-    const updated = await this.setCollaborators(ticketId, Array.from(current));
-    await cacheInvalidatePrefix(ccCachePrefix(userId));
-    return updated;
-  },
-
-  async addUserToCc(
-    ticketId: number,
-    userId: number,
-  ): Promise<ZendeskTicket> {
-    const ticket = await this.getTicket(ticketId);
-    const current = new Set([
-      ...ticket.collaborator_ids,
-      ...ticket.email_cc_ids,
-    ]);
-    current.add(userId);
-    const updated = await this.setCollaborators(ticketId, Array.from(current));
-    await cacheInvalidatePrefix(ccCachePrefix(userId));
-    return updated;
   },
 };

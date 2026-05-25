@@ -34,9 +34,9 @@ src/
 
 ## Features
 
-- **Repository pattern**: `zendeskRepository.listCcTickets / removeUserFromCc /
-  addUserToCc`. The repo is the only place that talks to Zendesk and the only
-  place that touches the cache.
+- **Repository pattern**: `zendeskRepository.listCcTickets / updateEmailCc`.
+  The repo is the only place that talks to Zendesk and the only place that
+  touches the cache.
 - **SQLite cache via [Keyv](https://keyv.org/)**: each cursor page is
   cached separately for 2 minutes in `data/cache.sqlite`
   (`cc-tickets:<userId>:<cursor>`). After a CC change we iterate the
@@ -82,9 +82,10 @@ Then open <http://localhost:3000>.
   rendered as plain navigations (`/?after=...` or `/?before=...`), so each
   page is server-rendered and independently cacheable. We avoid the
   Search API because it's eventually consistent and harder to scope.
-- Removing/adding CC is done by `PUT /tickets/:id.json` with an updated
-  `collaborator_ids` array. The repo reads the current ticket first so it
-  only removes (or adds) the demo user — every other CC'd user is preserved.
+- Removing/adding CC is done by a single `PUT /tickets/:id.json` with
+  `{ ticket: { email_ccs: [{ user_id, action: 'put' | 'delete' }] } }` —
+  Zendesk's delta-update API. No read-modify-write is needed: the delta
+  only touches the demo user and every other CC'd user is preserved.
 - The cache layer is [Keyv](https://keyv.org/) backed by `@keyv/sqlite`,
   with TTLs baked into each `set(key, value, ttlMs)` call. Prefix
   invalidation walks the namespace iterator and deletes matching keys —

@@ -27,10 +27,11 @@ export const removeFromCcAction = actionClient
       );
     }
 
-    const ticket = await zendeskRepository.removeUserFromCc(
-      parsedInput.ticketId,
+    const ticket = await zendeskRepository.updateEmailCc({
+      ticketId: parsedInput.ticketId,
       userId,
-    );
+      action: "delete",
+    });
     revalidatePath("/");
     return { ticket };
   });
@@ -38,10 +39,11 @@ export const removeFromCcAction = actionClient
 export const addToCcAction = actionClient
   .inputSchema(ticketIdSchema)
   .action(async ({ parsedInput }) => {
-    const ticket = await zendeskRepository.addUserToCc(
-      parsedInput.ticketId,
-      config.demoUserId,
-    );
+    const ticket = await zendeskRepository.updateEmailCc({
+      ticketId: parsedInput.ticketId,
+      userId: config.demoUserId,
+      action: "put",
+    });
     revalidatePath("/");
     return { ticket };
   });

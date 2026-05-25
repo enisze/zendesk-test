@@ -2,6 +2,7 @@
 
 import { useAction } from "next-safe-action/hooks";
 import { useQueryStates } from "nuqs";
+import { useState } from "react";
 import { PaginationLink } from "@/components/pagination-link";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,9 +15,9 @@ import {
 import type { ZendeskTicket } from "@/repositories/zendesk-repository";
 import { addToCcAction, removeFromCcAction } from "./actions";
 import {
-  DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
   paginationParsers,
+  serializePagination,
 } from "./search-params";
 
 type Props = {
@@ -26,7 +27,7 @@ type Props = {
   hasMore: boolean;
   afterCursor: string | null;
   beforeCursor: string | null;
-  isFirstPage: boolean;
+  page: number;
   size: number;
 };
 
@@ -37,19 +38,6 @@ function isUserCcd(ticket: ZendeskTicket, userId: number): boolean {
   );
 }
 
-function buildHref(params: {
-  size: number;
-  after?: string | null;
-  before?: string | null;
-}): string {
-  const sp = new URLSearchParams();
-  if (params.size !== DEFAULT_PAGE_SIZE) sp.set("size", String(params.size));
-  if (params.after) sp.set("after", params.after);
-  if (params.before) sp.set("before", params.before);
-  const qs = sp.toString();
-  return qs ? `/?${qs}` : "/";
-}
-
 export function TicketsView({
   userId,
   tickets,
@@ -57,17 +45,27 @@ export function TicketsView({
   hasMore,
   afterCursor,
   beforeCursor,
-  isFirstPage,
+  page,
   size,
 }: Props) {
+  const isFirstPage = page <= 1;
   const remove = useAction(removeFromCcAction);
   const add = useAction(addToCcAction);
+  const [addTicketId, setAddTicketId] = useState("");
 
   // The select changes size and clears cursors in a single navigation.
   const [, setParams] = useQueryStates(paginationParsers, { shallow: false });
 
   const serverError =
     remove.result?.serverError ?? add.result?.serverError ?? null;
+
+  function handleAddById(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const ticketId = Number(addTicketId);
+    if (!Number.isInteger(ticketId) || ticketId <= 0) return;
+    add.execute({ ticketId });
+    setAddTicketId("");
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-12">
@@ -90,6 +88,7 @@ export function TicketsView({
                 size: Number(e.target.value),
                 after: null,
                 before: null,
+                page: null,
               })
             }
             className="h-7 rounded-md border border-border bg-background px-2 text-[0.8rem] font-medium text-foreground"
@@ -102,6 +101,34 @@ export function TicketsView({
           </select>
         </label>
       </header>
+
+      <form
+        onSubmit={handleAddById}
+        className="mb-4 flex items-end gap-2 rounded-md border border-border bg-background px-3 py-2"
+      >
+        <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+          Add yourself to a ticket by ID
+          <input
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={addTicketId}
+            onChange={(e) => setAddTicketId(e.target.value)}
+            placeholder="e.g. 12345"
+            className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+          />
+        </label>
+        <Button
+          type="submit"
+          variant="outline"
+          size="sm"
+          disabled={add.isPending || addTicketId.trim() === ""}
+        >
+          {add.isPending && add.input?.ticketId === Number(addTicketId)
+            ? "Adding…"
+            : "Add to CC"}
+        </Button>
+      </form>
 
       {serverError ? (
         <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -132,7 +159,7 @@ export function TicketsView({
                       Status: {ticket.status}
                       {ticket.priority ? ` · Priority: ${ticket.priority}` : ""}
                       {" · "}
-                      Updated {new Date(ticket.updated_at).toLocaleString()}
+                      Updated {new Date(ticket.updated_at).toLocaleString("en-US")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex items-center justify-between gap-2">
@@ -169,18 +196,43 @@ export function TicketsView({
       <nav className="mt-6 flex items-center justify-between gap-2">
         <PaginationLink
           href={
-            beforeCursor && !isFirstPage
-              ? buildHref({ size, before: beforeCursor })
-              : undefined
+            isFirstPage
+              ? undefined
+              : page === 2
+                ? serializePagination("/", {
+                    size,
+                    after: null,
+                    before: null,
+                    page: null,
+                  })
+                : beforeCursor
+                  ? serializePagination("/", {
+                      size,
+                      before: beforeCursor,
+                      after: null,
+                      page: page - 1,
+                    })
+                  : undefined
           }
-          disabled={isFirstPage || !beforeCursor}
+          disabled={isFirstPage || (page > 2 && !beforeCursor)}
           ariaLabel="Previous page"
         >
           ← Previous
         </PaginationLink>
 
+        <span className="text-xs text-muted-foreground">Page {page}</span>
+
         <PaginationLink
-          href={hasMore && afterCursor ? buildHref({ size, after: afterCursor }) : undefined}
+          href={
+            hasMore && afterCursor
+              ? serializePagination("/", {
+                  size,
+                  after: afterCursor,
+                  before: null,
+                  page: page + 1,
+                })
+              : undefined
+          }
           disabled={!hasMore || !afterCursor}
           ariaLabel="Next page"
         >
