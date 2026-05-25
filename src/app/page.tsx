@@ -4,12 +4,10 @@ import {
   ZendeskError,
   zendeskRepository,
 } from "@/repositories/zendesk-repository";
-import { paginationSearchParams } from "./search-params";
+import { paginationSearchParams } from "./search-params-cache";
 import { TicketsView } from "./tickets-view";
 
 export const dynamic = "force-dynamic";
-
-const PAGE_SIZE = 25;
 
 export default async function Home({
   searchParams,
@@ -17,12 +15,13 @@ export default async function Home({
   searchParams: Promise<SearchParams>;
 }) {
   const userId = config.demoUserId;
-  const { after, before } = await paginationSearchParams.parse(searchParams);
+  const { after, before, size } =
+    await paginationSearchParams.parse(searchParams);
 
   try {
     const result = await zendeskRepository.listCcTickets({
       userId,
-      pageSize: PAGE_SIZE,
+      pageSize: size,
       after,
       before,
     });
@@ -37,6 +36,7 @@ export default async function Home({
           afterCursor={result.afterCursor}
           beforeCursor={result.beforeCursor}
           isFirstPage={!after && !before}
+          size={size}
         />
       </main>
     );

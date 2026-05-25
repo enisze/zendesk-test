@@ -1,6 +1,7 @@
 "use client";
 
 import { useAction } from "next-safe-action/hooks";
+import { useQueryStates } from "nuqs";
 import { PaginationLink } from "@/components/pagination-link";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,11 @@ import {
 } from "@/components/ui/card";
 import type { ZendeskTicket } from "@/repositories/zendesk-repository";
 import { addToCcAction, removeFromCcAction } from "./actions";
+import {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+  paginationParsers,
+} from "./search-params";
 
 type Props = {
   userId: number;
@@ -21,6 +27,7 @@ type Props = {
   afterCursor: string | null;
   beforeCursor: string | null;
   isFirstPage: boolean;
+  size: number;
 };
 
 function isUserCcd(ticket: ZendeskTicket, userId: number): boolean {
@@ -28,6 +35,19 @@ function isUserCcd(ticket: ZendeskTicket, userId: number): boolean {
     ticket.collaborator_ids.includes(userId) ||
     ticket.email_cc_ids.includes(userId)
   );
+}
+
+function buildHref(params: {
+  size: number;
+  after?: string | null;
+  before?: string | null;
+}): string {
+  const sp = new URLSearchParams();
+  if (params.size !== DEFAULT_PAGE_SIZE) sp.set("size", String(params.size));
+  if (params.after) sp.set("after", params.after);
+  if (params.before) sp.set("before", params.before);
+  const qs = sp.toString();
+  return qs ? `/?${qs}` : "/";
 }
 
 export function TicketsView({
@@ -38,26 +58,49 @@ export function TicketsView({
   afterCursor,
   beforeCursor,
   isFirstPage,
+  size,
 }: Props) {
   const remove = useAction(removeFromCcAction);
   const add = useAction(addToCcAction);
 
+  // The select changes size and clears cursors in a single navigation.
+  const [, setParams] = useQueryStates(paginationParsers, { shallow: false });
+
   const serverError =
     remove.result?.serverError ?? add.result?.serverError ?? null;
 
-  const showPagination =
-    !isFirstPage || hasMore || beforeCursor !== null || afterCursor !== null;
-
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-12">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Zendesk tickets CC'ing you
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Showing tickets where user #{userId} is CC'd.
-          {cached ? " (page served from cache)" : ""}
-        </p>
+      <header className="mb-6 flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Zendesk tickets CC'ing you
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Showing tickets where user #{userId} is CC'd.
+            {cached ? " (page served from cache)" : ""}
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Per page
+          <select
+            value={size}
+            onChange={(e) =>
+              setParams({
+                size: Number(e.target.value),
+                after: null,
+                before: null,
+              })
+            }
+            className="h-7 rounded-md border border-border bg-background px-2 text-[0.8rem] font-medium text-foreground"
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
       {serverError ? (
@@ -123,37 +166,27 @@ export function TicketsView({
         </ul>
       )}
 
-      {showPagination ? (
-        <nav className="mt-6 flex items-center justify-between gap-2">
-          {beforeCursor && !isFirstPage ? (
-            <PaginationLink
-              href={`/?before=${encodeURIComponent(beforeCursor)}`}
-              ariaLabel="Previous page"
-            >
-              ← Previous
-            </PaginationLink>
-          ) : (
-            <PaginationLink
-              href={isFirstPage ? undefined : "/"}
-              disabled={isFirstPage}
-              ariaLabel="First page"
-            >
-              ← First
-            </PaginationLink>
-          )}
+      <nav className="mt-6 flex items-center justify-between gap-2">
+        <PaginationLink
+          href={
+            beforeCursor && !isFirstPage
+              ? buildHref({ size, before: beforeCursor })
+              : undefined
+          }
+          disabled={isFirstPage || !beforeCursor}
+          ariaLabel="Previous page"
+        >
+          ← Previous
+        </PaginationLink>
 
-          {hasMore && afterCursor ? (
-            <PaginationLink
-              href={`/?after=${encodeURIComponent(afterCursor)}`}
-              ariaLabel="Next page"
-            >
-              Next →
-            </PaginationLink>
-          ) : (
-            <span className="text-xs text-muted-foreground">End of list</span>
-          )}
-        </nav>
-      ) : null}
+        <PaginationLink
+          href={hasMore && afterCursor ? buildHref({ size, after: afterCursor }) : undefined}
+          disabled={!hasMore || !afterCursor}
+          ariaLabel="Next page"
+        >
+          Next →
+        </PaginationLink>
+      </nav>
     </div>
   );
 }
