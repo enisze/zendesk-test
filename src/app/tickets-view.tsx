@@ -31,13 +31,6 @@ type Props = {
   size: number;
 };
 
-function isUserCcd(ticket: ZendeskTicket, userId: number): boolean {
-  return (
-    ticket.collaborator_ids.includes(userId) ||
-    ticket.email_cc_ids.includes(userId)
-  );
-}
-
 export function TicketsView({
   userId,
   tickets,
@@ -52,8 +45,8 @@ export function TicketsView({
   const remove = useAction(removeFromCcAction);
   const add = useAction(addToCcAction);
   const [addTicketId, setAddTicketId] = useState("");
+  const [submittedAddId, setSubmittedAddId] = useState<number | null>(null);
 
-  // The select changes size and clears cursors in a single navigation.
   const [, setParams] = useQueryStates(paginationParsers, { shallow: false });
 
   const serverError =
@@ -63,9 +56,15 @@ export function TicketsView({
     e.preventDefault();
     const ticketId = Number(addTicketId);
     if (!Number.isInteger(ticketId) || ticketId <= 0) return;
+    setSubmittedAddId(ticketId);
     add.execute({ ticketId });
     setAddTicketId("");
   }
+
+  const isAddingFromForm =
+    submittedAddId !== null &&
+    add.isPending &&
+    add.input?.ticketId === submittedAddId;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-12">
@@ -124,17 +123,15 @@ export function TicketsView({
           size="sm"
           disabled={add.isPending || addTicketId.trim() === ""}
         >
-          {add.isPending && add.input?.ticketId === Number(addTicketId)
-            ? "Adding…"
-            : "Add to CC"}
+          {isAddingFromForm ? "Adding…" : "Add to CC"}
         </Button>
       </form>
 
-      {serverError ? (
+      {serverError && (
         <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {serverError}
         </div>
-      ) : null}
+      )}
 
       {tickets.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -143,11 +140,8 @@ export function TicketsView({
       ) : (
         <ul className="flex flex-col gap-3">
           {tickets.map((ticket) => {
-            const ccd = isUserCcd(ticket, userId);
             const isRemoving =
               remove.isPending && remove.input?.ticketId === ticket.id;
-            const isAdding =
-              add.isPending && add.input?.ticketId === ticket.id;
             return (
               <li key={ticket.id}>
                 <Card>
@@ -162,29 +156,15 @@ export function TicketsView({
                       Updated {new Date(ticket.updated_at).toLocaleString("en-US")}
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {ccd ? "You're on CC." : "You're no longer on CC."}
-                    </span>
-                    {ccd ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={isRemoving}
-                        onClick={() => remove.execute({ ticketId: ticket.id })}
-                      >
-                        {isRemoving ? "Removing…" : "Remove from CC"}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isAdding}
-                        onClick={() => add.execute({ ticketId: ticket.id })}
-                      >
-                        {isAdding ? "Adding…" : "Add back to CC"}
-                      </Button>
-                    )}
+                  <CardContent className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={isRemoving}
+                      onClick={() => remove.execute({ ticketId: ticket.id })}
+                    >
+                      {isRemoving ? "Removing…" : "Remove from CC"}
+                    </Button>
                   </CardContent>
                 </Card>
               </li>

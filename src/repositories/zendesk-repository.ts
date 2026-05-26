@@ -120,7 +120,10 @@ export const zendeskRepository = {
   async listCcTickets(args: ListCcTicketsArgs): Promise<ListResult> {
     const key = ccCacheKey(args);
     const cached = await cacheGet<Omit<ListResult, "cached">>(key);
-    if (cached) return { ...cached, cached: true };
+    if (cached) {
+      console.log(`Cache hit for ${key}`);
+      return { ...cached, cached: true };
+    }
 
     const data = await zendeskFetch(buildCcdUrl(args), ccdListResponseSchema, {
       method: "GET",

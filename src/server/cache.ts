@@ -4,6 +4,9 @@ import path from "node:path";
 import KeyvSqlite from "@keyv/sqlite";
 import Keyv from "keyv";
 
+// @keyv/sqlite creates the .sqlite file on first write but not its parent
+// directory, so we ensure ./data exists on boot. If startup ever grows past
+// this single guard, lift it into Next's instrumentation.ts 
 const dataDir = path.join(process.cwd(), "data");
 mkdirSync(dataDir, { recursive: true });
 

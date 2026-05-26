@@ -80,8 +80,7 @@ Then open <http://localhost:3000>.
   `GET /users/:id/tickets/ccd.json` endpoint with cursor pagination
   (`page[size]` / `page[after]` / `page[before]`). Previous + Next links are
   rendered as plain navigations (`/?after=...` or `/?before=...`), so each
-  page is server-rendered and independently cacheable. We avoid the
-  Search API because it's eventually consistent and harder to scope.
+  page is server-rendered and independently cacheable.
 - Removing/adding CC is done by a single `PUT /tickets/:id.json` with
   `{ ticket: { email_ccs: [{ user_id, action: 'put' | 'delete' }] } }` —
   Zendesk's delta-update API. No read-modify-write is needed: the delta
