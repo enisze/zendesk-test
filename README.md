@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zendesk CC Tickets
 
-## Getting Started
+A small demo app that lists Zendesk tickets where a predefined user is CC'd
+and lets you remove that user from CC (or add them back). The frontend is
+React (Next.js App Router) and the backend is Node, running in the same
+Next.js process.
 
-First, run the development server:
+Zendesk credentials never reach the browser:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- The home page is a **server component** that calls the Zendesk repository
+  directly during render.
+- Mutations are exposed as **type-safe server actions** built with
+  [`next-safe-action`](https://next-safe-action.dev/) — zod-validated input,
+  typed `result.data` / `result.serverError` on the client, never the API
+  token.
+
+## Architecture
+
+```
+src/
+├─ app/
+│  ├─ page.tsx           # server component: fetches via repository, renders TicketsView
+│  ├─ tickets-view.tsx   # client component: buttons call safe actions
+│  └─ actions.ts         # "use server" — removeFromCcAction, addToCcAction
+├─ lib/
+│  └─ safe-action.ts     # createSafeActionClient with custom error handler
+├─ repositories/
+│  └─ zendesk-repository.ts   # all Zendesk HTTP, transparently cached
+└─ server/
+   ├─ config.ts         # env validation
+   ├─ cache.ts          # Keyv + @keyv/sqlite (TTL key/value)
+   └─ rate-limit.ts     # rate-limiter-flexible (in-memory)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Repository pattern**: `zendeskRepository.listCcTickets / updateEmailCc`.
+  The repo is the only place that talks to Zendesk and the only place that
+  touches the cache.
+- **SQLite cache via [Keyv](https://keyv.org/)**: each cursor page is
+  cached separately for 2 minutes in `data/cache.sqlite`
+  (`cc-tickets:<userId>:<cursor>`). After a CC change we iterate the
+  namespace and invalidate every page for the affected user via a prefix
+  delete. SQLite is used **only** for this cache — there are no domain
+  tables and no ORM in the project.
+- **Type-safe server actions** via `next-safe-action`: input schemas (zod)
+  are validated on the server; typed errors (`RateLimitError`, `ZendeskError`)
+  are mapped to friendly messages by `handleServerError` and surfaced as
+  `result.serverError` on the client.
+- **Rate limiting** on remove-from-CC:
+  - 1 request per user per minute
+  - 3 requests globally per minute
+  A `RateLimitError` is thrown inside the action and rendered with a
+  "try again in Ns" hint.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup
 
-## Learn More
+Requires [Bun](https://bun.sh/).
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+bun install
+cp .env.example .env.local
+# edit .env.local with real Zendesk values
+bun run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Then open <http://localhost:3000>.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Environment variables
 
-## Deploy on Vercel
+| Variable             | Description                                                          |
+| -------------------- | -------------------------------------------------------------------- |
+| `ZENDESK_BASE_URL`   | Full API base URL, e.g. `https://con-leafworks2.zendesk.com/api/v2`. |
+| `ZENDESK_API_TOKEN`  | Token sent as `Authorization: Bearer <token>`.                       |
+| `DEMO_USER_ID`       | Numeric ID of the user whose CC'd tickets are shown.                 |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## How it works
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- The CC list comes from Zendesk's purpose-built
+  `GET /users/:id/tickets/ccd.json` endpoint with cursor pagination
+  (`page[size]` / `page[after]` / `page[before]`). Previous + Next links are
+  rendered as plain navigations (`/?after=...` or `/?before=...`), so each
+  page is server-rendered and independently cacheable.
+- Removing/adding CC is done by a single `PUT /tickets/:id.json` with
+  `{ ticket: { email_ccs: [{ user_id, action: 'put' | 'delete' }] } }` —
+  Zendesk's delta-update API. No read-modify-write is needed: the delta
+  only touches the demo user and every other CC'd user is preserved.
+- The cache layer is [Keyv](https://keyv.org/) backed by `@keyv/sqlite`,
+  with TTLs baked into each `set(key, value, ttlMs)` call. Prefix
+  invalidation walks the namespace iterator and deletes matching keys —
+  acceptable here because the cache stays small (a handful of cursor
+  pages per user).
+- Rate limiting is provided by
+  [`rate-limiter-flexible`](https://github.com/animir/node-rate-limiter-flexible)
+  via two `RateLimiterMemory` instances (per-user and global, both
+  60-second windows). The two limits are consumed in order; if the global
+  gate fails, the per-user point is rewarded back so a user isn't
+  penalised for someone else's traffic.
+
+## Limitations
+
+- The rate limiter is in-process; for multi-instance deploys swap it for
+  Redis or another shared store (`rate-limiter-flexible` supports it
+  with the same `consume`/`reward` API).
+- Cache invalidation iterates the Keyv namespace; fine at this scale,
+  not great if the cache grows to thousands of keys per user.
